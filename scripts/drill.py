@@ -210,6 +210,56 @@ def main() -> None:
             ok(srv.get("/api/verify")[1]["consistent"], "array verifies")
             ok(srv.snapshot() == degraded_view, "final bytes match the degraded view")
 
+        print("\nphase 5: repair mix-up — swap the two data disk filenames")
+        healthy_view = None
+        with Server(data_dir) as srv:
+            status = srv.get("/api/status")[1]
+            members = {member["slot"]: member for member in status["members"]}
+            ok(
+                all(not member["swapped"] for member in members.values()),
+                "status lists one image per logical slot, none swapped",
+            )
+            healthy_view = srv.snapshot()
+
+        data0 = data_dir / "data0.img"
+        data1 = data_dir / "data1.img"
+        tmp_name = data_dir / "swap.tmp"
+        os.rename(data0, tmp_name)
+        os.rename(data1, data0)
+        os.rename(tmp_name, data1)
+
+        with Server(data_dir) as srv:
+            status = srv.get("/api/status")[1]
+            members = {member["slot"]: member for member in status["members"]}
+            ok(
+                members["data0"]["image"] == "data1.img"
+                and members["data1"]["image"] == "data0.img",
+                "status shows each slot following its member, not its filename",
+            )
+            ok(members["data0"]["swapped"], "data0 slot flags the swapped image")
+            ok(srv.snapshot() == healthy_view, "block reads stay on the original slots")
+            status, _ = srv.request(
+                "POST", "/api/write", {"index": 3, "disk": "data0", "fill": 0x7D}
+            )
+            ok(status == 200, "writes still land on the original member")
+            ok(srv.get("/api/verify")[1]["consistent"], "array still verifies")
+
+        # A foreign equal-length image must stop startup without changing bytes.
+        os.replace(data0, data_dir / "data0.img.keep")
+        with open(data0, "wb") as handle:
+            handle.write(b"\x99" * (4 * BLOCK))
+        refused = False
+        try:
+            with Server(data_dir) as srv:
+                srv.get("/api/status")
+        except RuntimeError:
+            refused = True
+        ok(refused, "foreign equal-length image refuses to start")
+        os.replace(data_dir / "data0.img.keep", data0)
+
+        with Server(data_dir) as srv:
+            ok(srv.get("/api/verify")[1]["consistent"], "correct member restarts the volume")
+
     print("\nall drill phases passed")
 
 

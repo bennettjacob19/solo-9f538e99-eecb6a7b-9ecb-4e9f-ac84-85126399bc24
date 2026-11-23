@@ -137,9 +137,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         version="1.0.0",
         description=(
             "Three-disk XOR array (data0, data1, parity) with 4 KiB blocks, a "
-            "single-slot redo journal and power-loss simulation. Restart with "
-            "`OFFLINE_DISK=data0` or `OFFLINE_DISK=data1` for read-only "
-            "degraded mode."
+            "single-slot redo journal, power-loss simulation and durable member "
+            "identification. Each logical slot follows its registered member even "
+            "when disk image filenames are swapped; `GET /api/status` lists the "
+            "image behind every slot, and foreign or duplicate member images refuse "
+            "startup. Restart with `OFFLINE_DISK=data0` or `OFFLINE_DISK=data1` for "
+            "read-only degraded mode."
         ),
         lifespan=lifespan,
     )
